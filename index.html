@@ -386,11 +386,15 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
       }
     });
 
+    var initialLoaded = false;
     flowersRef.limitToLast(MAX).on('child_added', function (snap) {
+      if (!initialLoaded) return;
       var data = snap.val();
       if (!data) return;
-      var isOld = data.createdAt && data.createdAt < joinTime - 2000;
-      pushLocalFlower(data, isOld ? 5 : 0, snap.key);
+      pushLocalFlower(data, 0, snap.key);
+    });
+    flowersRef.limitToLast(MAX).once('value', function () {
+      initialLoaded = true;
     });
 
     flowersRef.on('child_removed', function (snap) {
@@ -402,7 +406,6 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     });
   } else {
     onlineText.textContent = 'Chế độ offline (chưa gắn Firebase)';
-    seed();
   }
 
   function nextKind() { var idx = Math.floor(taps / 10) + 1; return idx % 2 === 1 ? 'mai' : 'đào'; }
