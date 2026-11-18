@@ -347,8 +347,12 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   // === KẾT NỐI FIREBASE REALTIME ===
   var hasFirebase = FIREBASE_CONFIG.databaseURL && FIREBASE_CONFIG.databaseURL.indexOf('PASTE_') === -1 && typeof firebase !== 'undefined';
   var flowersRef = null, myOnlineRef = null;
-  var clientId = 'u_' + Math.random().toString(36).slice(2, 10);
-  var joinTime = Date.now();
+  var clientId = '';
+  try { clientId = localStorage.getItem('garden_client_id') || ''; } catch (err) {}
+  if (!clientId) {
+    clientId = 'u_' + Math.random().toString(36).slice(2, 10);
+    try { localStorage.setItem('garden_client_id', clientId); } catch (err) {}
+  }
 
   function syncPresenceName() {
     if (!myOnlineRef) return;
@@ -373,11 +377,21 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
       }
     });
 
+    function leaveGarden() {
+      if (myOnlineRef) myOnlineRef.remove();
+    }
+    window.addEventListener('pagehide', leaveGarden);
+    window.addEventListener('beforeunload', leaveGarden);
+
     onlineRef.on('value', function (snap) {
       var val = snap.val() || {};
-      var names = [];
+      var seenNames = {}, names = [];
       Object.keys(val).forEach(function (k) {
-        if (val[k] && val[k].name) names.push(val[k].name);
+        var n = val[k] && val[k].name ? val[k].name.trim() : '';
+        if (n && !seenNames[n]) {
+          seenNames[n] = true;
+          names.push(n);
+        }
       });
       if (names.length === 0) {
         onlineText.textContent = 'Chưa có ai ở vườn';
