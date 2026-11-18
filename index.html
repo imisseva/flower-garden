@@ -1,0 +1,447 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Flower</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600&display=swap">
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-database-compat.js"></script>
+<style>
+/* Layout: a full-screen night garden. Canvas fills the viewport, a quiet hint at top, progress and reset at bottom. */
+:root {
+  --bg: #14161f;
+  --bg-glow: #232a42;
+  --fg: #eceaf4;
+  --muted: #a8a6bd;
+  --accent: #f4a3c0;
+  --line: rgba(236, 234, 244, 0.18);
+  --chip: rgba(236, 234, 244, 0.08);
+  --body: 'Nunito', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  color-scheme: dark;
+}
+html, body { height: 100%; margin: 0; overscroll-behavior: none; -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; }
+body {
+  background: radial-gradient(120% 90% at 50% 100%, var(--bg-glow), var(--bg) 70%);
+  color: var(--fg);
+  font-family: var(--body);
+  overflow: hidden;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+#c { position: fixed; inset: 0; width: 100%; height: 100%; display: block; cursor: pointer; }
+.ui {
+  position: fixed; inset: 0; pointer-events: none;
+  display: flex; flex-direction: column; justify-content: space-between;
+  padding-block: calc(20px + env(safe-area-inset-top, 0px)) calc(20px + env(safe-area-inset-bottom, 0px));
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+.header-left { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.hint { margin: 0; color: var(--muted); font-size: 1rem; line-height: 1.5; transition: opacity 0.8s; }
+.hint.quiet { opacity: 0; }
+.online {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 0.9rem; color: var(--fg);
+  background: rgba(20, 22, 31, 0.72); border: 1px solid var(--line);
+  border-radius: 999px; padding: 8px 14px;
+  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+}
+.online .dot { width: 8px; height: 8px; border-radius: 50%; background: #6ee7b7; flex-shrink: 0; }
+.online.offline .dot { background: var(--muted); }
+footer { display: flex; justify-content: center; }
+.count { color: var(--fg); font-size: 1rem; font-variant-numeric: tabular-nums; min-width: 0; text-align: center; background: rgba(20, 22, 31, 0.72); border: 1px solid var(--line); border-radius: 999px; padding: 10px 18px; -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
+button {
+  pointer-events: auto; font: 600 0.95rem var(--body); color: var(--fg);
+  background: var(--chip); border: 1px solid var(--line); border-radius: 999px;
+  padding: 0 16px; min-height: 44px; cursor: pointer; transition: background 0.2s, border-color 0.2s;
+}
+button:hover { background: rgba(236, 234, 244, 0.16); border-color: var(--accent); }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.modal-backdrop {
+  position: fixed; inset: 0; z-index: 10;
+  background: rgba(10, 12, 18, 0.72);
+  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+  display: flex; align-items: center; justify-content: center; padding: 16px;
+}
+.modal-backdrop.hidden { display: none; }
+.modal {
+  width: 100%; max-width: 340px;
+  background: #1b1f2e; border: 1px solid var(--line); border-radius: 20px;
+  padding: 22px; box-shadow: 0 20px 50px rgba(0, 0, 0, 0.45);
+  display: flex; flex-direction: column; gap: 14px;
+}
+.modal h2 { margin: 0; font-size: 1.2rem; font-weight: 600; }
+.modal p { margin: 0; font-size: 0.92rem; color: var(--muted); line-height: 1.45; }
+.modal input {
+  width: 100%; box-sizing: border-box;
+  font: 400 1rem var(--body); color: var(--fg);
+  background: rgba(255, 255, 255, 0.06); border: 1px solid var(--line);
+  border-radius: 12px; padding: 11px 14px; outline: none;
+}
+.modal input:focus { border-color: var(--accent); }
+.modal button[type="submit"] {
+  background: var(--accent); color: #14161f; border-color: transparent;
+}
+.modal button[type="submit"]:hover { opacity: 0.92; background: var(--accent); }
+</style>
+</head>
+<body>
+
+<canvas id="c" aria-label="Khu vườn: chạm để hoa nở"></canvas>
+<div class="ui">
+  <header>
+    <div class="header-left">
+      <button id="clear" type="button">Làm mới vườn</button>
+      <button id="nameBtn" type="button">Tên: Khách</button>
+      <p class="hint" id="hint">Chạm vào màn hình để hoa nở.</p>
+    </div>
+    <div class="online offline" id="online">
+      <span class="dot"></span>
+      <span id="onlineText">Chế độ offline</span>
+    </div>
+  </header>
+  <footer>
+    <span class="count" id="count"></span>
+  </footer>
+</div>
+
+<div class="modal-backdrop hidden" id="nameModal" role="dialog" aria-modal="true" aria-labelledby="nameTitle">
+  <form class="modal" id="nameForm">
+    <h2 id="nameTitle">Chào mừng vào khu vườn</h2>
+    <p>Nhập tên của bạn để mọi người biết ai đang ở trong vườn và ai đã trồng hoa.</p>
+    <input id="nameInput" type="text" maxlength="20" placeholder="Ví dụ: An, Bình..." autocomplete="off" required>
+    <button type="submit">Vào vườn</button>
+  </form>
+</div>
+
+<script>
+(function () {
+  // === CẤU HÌNH FIREBASE ===
+  var FIREBASE_CONFIG = {
+    apiKey: "AIzaSyDmjWhzYr4C6QNapz7YZ2SlwCt8iFOBjbU",
+    authDomain: "flower-bd438.firebaseapp.com",
+    databaseURL: "https://flower-bd438-default-rtdb.asia-southeast1.firebasedatabase.app",
+    projectId: "flower-bd438",
+    storageBucket: "flower-bd438.firebasestorage.app",
+    messagingSenderId: "614292008901",
+    appId: "1:614292008901:web:b7263944f090c03dd5e5ac"
+  };
+
+  var cv = document.getElementById('c'), ctx = cv.getContext('2d');
+  var reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var W = 0, H = 0, dpr = 1;
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth; H = window.innerHeight;
+    cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  resize(); window.addEventListener('resize', resize);
+
+  var HUES = [335, 350, 12, 38, 275, 262, 205, 318];
+  var MAX = 70, flowers = [], petals = [], dots = [], now = 0, taps = 0;
+  var seenIds = {};
+  var rnd = function (a, b) { return a + Math.random() * (b - a); };
+  var clamp = function (v) { return Math.max(0, Math.min(1, v)); };
+  var easeOut = function (t) { return 1 - Math.pow(1 - t, 3); };
+  var back = function (t) { var c = 1.4; return 1 + (c + 1) * Math.pow(t - 1, 3) + c * Math.pow(t - 1, 2); };
+
+  function makeFlowerData(nx, ny, kind, author) {
+    return {
+      nx: nx, ny: ny, bxOff: rnd(-90, 90),
+      hue: kind === 'mai' ? 48 : kind === 'đào' ? 345 : HUES[Math.floor(Math.random() * HUES.length)],
+      n: Math.floor(rnd(5, 10)), r: rnd(24, 36), rot: rnd(0, 6.28),
+      phase: rnd(0, 6.28), lean: rnd(-60, 60), kind: kind || null,
+      author: author || ''
+    };
+  }
+
+  function pushLocalFlower(data, age, id) {
+    if (id && seenIds[id]) return;
+    if (id) seenIds[id] = true;
+    var f = {
+      id: id || null,
+      nx: data.nx, ny: data.ny, bxOff: data.bxOff,
+      born: now - (age || 0),
+      hue: data.hue, n: data.n, r: data.r, rot: data.rot,
+      phase: data.phase, lean: data.lean,
+      shed: !!age, kind: data.kind || null,
+      author: data.author || ''
+    };
+    flowers.push(f);
+    if (flowers.length > MAX) {
+      var removed = flowers.shift();
+      if (removed && removed.id) delete seenIds[removed.id];
+    }
+  }
+
+  function seed() {
+    var n = W < 600 ? 4 : 7;
+    for (var i = 0; i < n; i++) {
+      var nx = 0.14 + 0.72 * (i + Math.random() * 0.6) / n;
+      var ny = rnd(0.34, 0.74);
+      pushLocalFlower(makeFlowerData(nx, ny, null, ''), 5);
+    }
+  }
+
+  for (var d = 0; d < 36; d++) dots.push({ x: Math.random(), y: Math.random(), s: rnd(0.8, 2.2), p: rnd(0, 6.28), v: rnd(0.004, 0.012) });
+
+  function spawnPetals(f, hx, hy) {
+    var n = f.kind ? 16 : 7;
+    for (var i = 0; i < n; i++) {
+      petals.push({ x: hx + rnd(-14, 14), y: hy + rnd(-10, 10), vx: rnd(-18, 18), vy: rnd(10, 26), a: rnd(0, 6.28), w: rnd(-1.5, 1.5), life: 0, max: rnd(5, 9), hue: f.hue, s: f.kind ? rnd(7, 11) : rnd(5, 9) });
+    }
+  }
+
+  // Hoa mai (vàng) và hoa đào (hồng): năm cánh tròn, nhụy xòe
+  function blossom(cx, cy, r, kind, rot) {
+    var mai = kind === 'mai';
+    ctx.save(); ctx.translate(cx, cy); ctx.rotate(rot);
+    for (var k = 0; k < 5; k++) {
+      ctx.save(); ctx.rotate(k * 6.2832 / 5);
+      var gr = ctx.createRadialGradient(0, -r * 0.2, 0, 0, -r * 0.55, r * 0.6);
+      gr.addColorStop(0, mai ? '#fff3b0' : '#ffeaf0');
+      gr.addColorStop(1, mai ? '#f5c016' : '#f28bb0');
+      ctx.beginPath(); ctx.ellipse(0, -r * 0.55, r * 0.46, r * 0.52, 0, 0, 6.283);
+      ctx.fillStyle = gr; ctx.fill(); ctx.restore();
+    }
+    ctx.strokeStyle = mai ? '#b8650d' : '#d4577f'; ctx.lineWidth = Math.max(1, r * 0.03);
+    ctx.fillStyle = mai ? '#8a4a08' : '#b83c68';
+    for (var s = 0; s < 9; s++) {
+      var a = s * 6.2832 / 9, l = r * 0.32;
+      ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(Math.cos(a) * l, Math.sin(a) * l); ctx.stroke();
+      ctx.beginPath(); ctx.arc(Math.cos(a) * l, Math.sin(a) * l, r * 0.04, 0, 6.283); ctx.fill();
+    }
+    ctx.beginPath(); ctx.arc(0, 0, r * 0.12, 0, 6.283); ctx.fillStyle = mai ? '#e8891a' : '#fbd3df'; ctx.fill();
+    ctx.restore();
+  }
+
+  function drawAuthor(f, hx, hy, r, b) {
+    if (!f.author || b < 0.45) return;
+    var alpha = clamp((b - 0.45) / 0.55) * 0.78;
+    ctx.save();
+    ctx.font = '600 12px Nunito, system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = 'rgba(236, 234, 244, ' + alpha + ')';
+    ctx.fillText(f.author, hx, hy + r + (f.kind ? 24 : 10));
+    ctx.restore();
+  }
+
+  function drawFlower(f) {
+    var fx = f.nx * W, fy = f.ny * H, fbx = fx + f.bxOff;
+    var age = now - f.born;
+    var sw = reduce ? 0 : Math.sin(now * 0.8 + f.phase) * 6;
+    var g = easeOut(clamp(age / 1.4));
+    var hx = fx + sw, hy = fy;
+    var cx = fbx + f.lean + sw * 0.5, cy = (H + fy) / 2;
+    function px(t) { var u = 1 - t; return u * u * fbx + 2 * u * t * cx + t * t * hx; }
+    function py(t) { var u = 1 - t; return u * u * (H + 8) + 2 * u * t * cy + t * t * hy; }
+    var steps = 24, last = Math.max(1, Math.round(steps * g));
+    ctx.beginPath(); ctx.moveTo(px(0), py(0));
+    for (var i = 1; i <= last; i++) { var tt = i * g / last; ctx.lineTo(px(tt), py(tt)); }
+    ctx.strokeStyle = f.kind ? 'hsl(25,35%,32%)' : 'hsl(150,34%,36%)'; ctx.lineWidth = f.kind ? 4 : 3; ctx.lineCap = 'round'; ctx.stroke();
+    if (g > 0.6) {
+      var lt = 0.55 * g, lx = px(lt), ly = py(lt), ls = clamp((g - 0.6) / 0.4);
+      ctx.save(); ctx.translate(lx, ly); ctx.rotate(-0.7);
+      ctx.beginPath(); ctx.ellipse(16 * ls, 0, 16 * ls, 6 * ls, 0, 0, 6.283);
+      ctx.fillStyle = 'hsl(150,38%,40%)'; ctx.fill(); ctx.restore();
+    }
+    var b = clamp((age - 1.1) / 1.7);
+    if (b <= 0) return;
+    if (!f.shed && b >= 1) { f.shed = true; spawnPetals(f, hx, hy); }
+    var s = back(b), r = f.r * s;
+
+    if (f.kind) {
+      var glow = ctx.createRadialGradient(hx, hy, 0, hx, hy, r * 2.6);
+      var gc = f.kind === 'mai' ? '255,210,60' : '255,150,190';
+      glow.addColorStop(0, 'rgba(' + gc + ',0.38)'); glow.addColorStop(1, 'rgba(' + gc + ',0)');
+      ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(hx, hy, r * 2.6, 0, 6.283); ctx.fill();
+      var sats = [[-1.35, 0.9, 0.5], [1.3, 0.7, 0.45], [0.25, -1.5, 0.4]];
+      for (var q = 0; q < sats.length; q++) {
+        var st = sats[q], sx = hx + st[0] * r, sy = hy + st[1] * r;
+        ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(sx, sy);
+        ctx.strokeStyle = 'hsl(25,35%,32%)'; ctx.lineWidth = 2.5; ctx.stroke();
+        blossom(sx, sy, r * st[2], f.kind, f.rot + q);
+      }
+      blossom(hx, hy, r, f.kind, f.rot + sw * 0.01);
+      drawAuthor(f, hx, hy, r, b);
+      return;
+    }
+
+    var breathe = reduce ? 1 : 1 + Math.sin(now * 0.63 + f.phase) * 0.03;
+    ctx.save(); ctx.translate(hx, hy); ctx.rotate(f.rot + sw * 0.01);
+    for (var k = 0; k < f.n; k++) {
+      ctx.save(); ctx.rotate(k * 6.2832 / f.n);
+      var gr = ctx.createRadialGradient(0, -r * 0.2, 0, 0, -r * 0.6, r * 0.8);
+      gr.addColorStop(0, 'hsl(' + f.hue + ',80%,88%)'); gr.addColorStop(1, 'hsl(' + f.hue + ',70%,66%)');
+      ctx.beginPath(); ctx.ellipse(0, -r * 0.58 * breathe, r * 0.28, r * 0.56 * breathe, 0, 0, 6.283);
+      ctx.fillStyle = gr; ctx.fill(); ctx.restore();
+    }
+    ctx.beginPath(); ctx.arc(0, 0, r * 0.24, 0, 6.283); ctx.fillStyle = 'hsl(44,92%,68%)'; ctx.fill();
+    ctx.restore();
+    drawAuthor(f, hx, hy, r, b);
+  }
+
+  var lastT = 0;
+  function frame(ts) {
+    var t = ts / 1000, dt = Math.min(0.05, t - lastT); lastT = t; now = t;
+    ctx.clearRect(0, 0, W, H);
+    for (var i = 0; i < dots.length; i++) {
+      var o = dots[i]; if (!reduce) { o.p += o.v; }
+      var x = (o.x + Math.sin(o.p) * 0.02) * W, y = ((o.y - (reduce ? 0 : now * 0.004 * o.s)) % 1 + 1) % 1 * H;
+      ctx.beginPath(); ctx.arc(x, y, o.s, 0, 6.283);
+      ctx.fillStyle = 'rgba(255,236,170,' + (0.25 + 0.25 * Math.sin(o.p * 3)) + ')'; ctx.fill();
+    }
+    for (var j = 0; j < flowers.length; j++) drawFlower(flowers[j]);
+    for (var p = petals.length - 1; p >= 0; p--) {
+      var q = petals[p]; q.life += dt;
+      if (q.life > q.max || q.y > H + 20) { petals.splice(p, 1); continue; }
+      q.x += (q.vx + Math.sin(q.life * 1.6 + q.a) * 12) * dt; q.y += q.vy * dt; q.a += q.w * dt;
+      ctx.save(); ctx.translate(q.x, q.y); ctx.rotate(q.a);
+      ctx.globalAlpha = clamp(1 - q.life / q.max) * 0.85;
+      ctx.beginPath(); ctx.ellipse(0, 0, q.s * 0.5, q.s, 0, 0, 6.283);
+      ctx.fillStyle = 'hsl(' + q.hue + ',75%,76%)'; ctx.fill(); ctx.restore();
+    }
+    requestAnimationFrame(frame);
+  }
+
+  // === QUẢN LÝ TÊN NGƯỜI DÙNG & ONLINE ===
+  var countEl = document.getElementById('count'), hint = document.getElementById('hint');
+  var nameBtn = document.getElementById('nameBtn'), onlineBox = document.getElementById('online'), onlineText = document.getElementById('onlineText');
+  var nameModal = document.getElementById('nameModal'), nameForm = document.getElementById('nameForm'), nameInput = document.getElementById('nameInput');
+
+  var myName = '';
+  try { myName = localStorage.getItem('garden_user_name') || ''; } catch (err) {}
+
+  function setNameUI(name) {
+    myName = name.trim().slice(0, 20);
+    nameBtn.textContent = 'Tên: ' + (myName || 'Khách');
+    try { if (myName) localStorage.setItem('garden_user_name', myName); } catch (err) {}
+  }
+
+  function openNameModal() {
+    nameInput.value = myName;
+    nameModal.classList.remove('hidden');
+    setTimeout(function () { nameInput.focus(); }, 50);
+  }
+
+  nameBtn.addEventListener('click', openNameModal);
+  nameForm.addEventListener('submit', function (e) {
+    e.preventDefault();
+    var val = nameInput.value.trim();
+    if (!val) return;
+    setNameUI(val);
+    nameModal.classList.add('hidden');
+    syncPresenceName();
+  });
+
+  if (myName) setNameUI(myName);
+  else openNameModal();
+
+  // === KẾT NỐI FIREBASE REALTIME ===
+  var hasFirebase = FIREBASE_CONFIG.databaseURL && FIREBASE_CONFIG.databaseURL.indexOf('PASTE_') === -1 && typeof firebase !== 'undefined';
+  var flowersRef = null, myOnlineRef = null;
+  var clientId = 'u_' + Math.random().toString(36).slice(2, 10);
+  var joinTime = Date.now();
+
+  function syncPresenceName() {
+    if (!myOnlineRef) return;
+    myOnlineRef.update({ name: myName || 'Khách' });
+  }
+
+  if (hasFirebase) {
+    firebase.initializeApp(FIREBASE_CONFIG);
+    var db = firebase.database();
+    flowersRef = db.ref('garden/flowers');
+    var onlineRef = db.ref('garden/online');
+    myOnlineRef = onlineRef.child(clientId);
+
+    db.ref('.info/connected').on('value', function (snap) {
+      if (snap.val() === true) {
+        onlineBox.classList.remove('offline');
+        myOnlineRef.onDisconnect().remove();
+        myOnlineRef.set({ name: myName || 'Khách', at: firebase.database.ServerValue.TIMESTAMP });
+      } else {
+        onlineBox.classList.add('offline');
+        onlineText.textContent = 'Đang kết nối lại...';
+      }
+    });
+
+    onlineRef.on('value', function (snap) {
+      var val = snap.val() || {};
+      var names = [];
+      Object.keys(val).forEach(function (k) {
+        if (val[k] && val[k].name) names.push(val[k].name);
+      });
+      if (names.length === 0) {
+        onlineText.textContent = 'Chưa có ai ở vườn';
+      } else {
+        onlineText.textContent = 'Đang ở vườn (' + names.length + '): ' + names.join(', ');
+      }
+    });
+
+    flowersRef.limitToLast(MAX).on('child_added', function (snap) {
+      var data = snap.val();
+      if (!data) return;
+      var isOld = data.createdAt && data.createdAt < joinTime - 2000;
+      pushLocalFlower(data, isOld ? 5 : 0, snap.key);
+    });
+
+    flowersRef.on('child_removed', function (snap) {
+      var key = snap.key;
+      delete seenIds[key];
+      for (var i = flowers.length - 1; i >= 0; i--) {
+        if (flowers[i].id === key) { flowers.splice(i, 1); break; }
+      }
+    });
+  } else {
+    onlineText.textContent = 'Chế độ offline (chưa gắn Firebase)';
+    seed();
+  }
+
+  function nextKind() { var idx = Math.floor(taps / 10) + 1; return idx % 2 === 1 ? 'mai' : 'đào'; }
+  function updateCount() {
+    var left = 10 - (taps % 10);
+    countEl.textContent = 'Còn ' + left + ' lần chạm nữa là hoa ' + nextKind() + ' nở';
+  }
+
+  cv.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+  cv.addEventListener('pointerdown', function (e) {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    if (!nameModal.classList.contains('hidden')) return;
+    taps++;
+    var kind = null;
+    if (taps % 10 === 0) kind = (taps / 10) % 2 === 1 ? 'mai' : 'đào';
+    var data = makeFlowerData(e.clientX / W, e.clientY / H, kind, myName || 'Khách');
+    if (hasFirebase && flowersRef) {
+      var ref = flowersRef.push();
+      pushLocalFlower(data, 0, ref.key);
+      data.createdAt = firebase.database.ServerValue.TIMESTAMP;
+      ref.set(data);
+    } else {
+      pushLocalFlower(data, 0);
+    }
+    try { if (navigator.vibrate) navigator.vibrate(kind ? [20, 40, 30] : 10); } catch (err) {}
+    hint.classList.add('quiet');
+    updateCount();
+  });
+
+  document.getElementById('clear').addEventListener('click', function () {
+    flowers = []; petals = []; taps = 0; seenIds = {};
+    if (hasFirebase && flowersRef) flowersRef.remove();
+    updateCount(); hint.classList.remove('quiet');
+  });
+
+  updateCount();
+  requestAnimationFrame(frame);
+})();
+</script>
+
+</body>
+</html>
